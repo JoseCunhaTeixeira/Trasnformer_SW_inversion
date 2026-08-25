@@ -1,0 +1,127 @@
+[project]
+name = "silex"
+version = "1.0.0"
+requires-python = ">=3.10"
+authors = [
+    { name = "J. Cunha Teixeira", email = "jose.cunha-teixeira@protonmail.com" },
+]
+dependencies = [
+    "keras",
+    "keras-nlp",
+    "torch",
+    "numpy",
+    "scipy",
+    "pandas",
+    "tqdm",
+    "matplotlib",
+]
+
+[project.optional-dependencies]
+# Only generation.py (synthetic training-data generation) and the
+# Grand_Est QC script need Santiludo's rock-physics forward model --
+# training/retraining/evaluation/inference don't. Kept optional since it's
+# a compiled Cython/C++ extension: building it needs a C++ toolchain (on
+# Windows, MSVC via Visual Studio Build Tools) that not every machine
+# running the rest of this package has installed.
+generation = [
+    "santiludo @ git+https://github.com/JoseCunhaTeixeira/santiludo.git",
+]
+
+# Only experiments/grand_est/plot_paper_figures.py's 3D cubes/slices (pyvista)
+# and its scientific colormap (cmcrameri) need these -- not part of base
+# dependencies since nothing else in the repo uses them. Neither was
+# actually installable before this was added (a pre-existing gap, not a
+# regression: the original script had the same unmet imports).
+paper_figures = [
+    "pyvista",
+    "cmcrameri",
+]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.package-dir]
+"" = "src"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+silex = ["py.typed"]
+
+
+# -------------------------
+# Pyright configuration
+# -------------------------
+[tool.pyright]
+pythonVersion = "3.10"
+typeCheckingMode = "strict"
+
+include = ["src", "scripts", "experiments"]
+
+exclude = [
+    "**/__pycache__",
+    ".venv",
+    "build",
+    "dist",
+    "**/node_modules",
+    "**/.*",
+]
+
+reportMissingTypeStubs = false
+
+# Same carve-out as sigpipe's pyproject.toml, same reasoning: ~93% of
+# findings under strict mode were matplotlib/keras stub gaps or deliberate
+# __post_init__/boundary validation, not real bugs. reportArgumentType /
+# reportGeneralTypeIssues / etc. stay on -- those catch real mismatches
+# regardless of stub quality.
+reportUnknownMemberType = false
+reportUnknownArgumentType = false
+reportUnknownVariableType = false
+reportUnnecessaryIsInstance = false
+
+
+# -------------------------
+# Ruff configuration
+# -------------------------
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+src = ["src"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort (import sorting)
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "SIM", # flake8-simplify
+    "C4",  # flake8-comprehensions
+    "PIE", # flake8-pie
+    "RET", # flake8-return
+    "PTH", # pathlib usage
+    "NPY", # NumPy rules
+    "RUF", # Ruff-specific rules
+    "ANN", # annotations
+    "ARG", # unused arguments
+    "ERA", # commented-out code
+]
+
+ignore = [
+    "E501", # line length handled by formatter
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["silex"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
+docstring-code-format = true

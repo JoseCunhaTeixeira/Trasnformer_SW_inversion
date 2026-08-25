@@ -1,15 +1,18 @@
+"""Grand_Est paper figures: 3D soil/N/mum cubes and channel slices (pyvista)
+plus the 2D soil+N/entropy/mum/Vs summary panels, aggregated over one or
+two date periods.
+
+Site-specific, paper-panel-layout-specific -- light cleanup only
+(folders.py/misc.py replaced by config.py/_legacy_utils.py), not held to
+the same bar as the core pipeline.
+Run from the repo root: python experiments/grand_est/plot_paper_figures.py
+
+Author : Jose CUNHA TEIXEIRA
+License : SNCF Reseau, UMR 7619 METIS, Sorbonne Universite
 """
-Author : José CUNHA TEIXEIRA
-License : SNCF Réseau, UMR 7619 METIS, Sorbonne Université
-Date : April 30, 2024
-"""
-
-
-
 
 
 import os
-import sys
 import numpy as np
 import pandas as pd
 import pyvista as pv
@@ -23,8 +26,8 @@ from scipy.interpolate import interp1d, RegularGridInterpolator
 from cmcrameri import cm
 
 
-from folders import PATH_OUTPUT, PATH_MODELS
-from misc import mode_filter_count, mode_filter_mean
+from _legacy_utils import mode_filter_count, mode_filter_mean
+from silex.config import Paths
 
 plt.rcParams.update({'font.size': 8})
 CM = 1/2.54
@@ -33,6 +36,7 @@ CM = 1/2.54
 
 
 ### PARAMS ----------------------------------------------------------------------------------------
+paths = Paths.from_env()
 model_id = '[202407170928]'
 periods = [['2022-07-01', '2022-07-31'],
            ['2023-07-01', '2023-07-31']] # From 2023-07-01 to 2023-07-31 and from 2024-07-01 to 2024-07-31
@@ -43,14 +47,17 @@ site = 'Grand_Est'
 
 
 ### FORMATS ---------------------------------------------------------------------------------------
-with open(f'{PATH_MODELS}/{model_id}/{model_id}_params.json', 'r') as f:
-    params = load(f)
-    dz_soil = params['data_params']['d_thickness']
-    dz_vel = params['data_params']['dz']
-    max_z = params['data_params']['max_depth']
-    soils = params['data_params']['soils']
-    Ns = params['data_params']['Ns']
-    WTs = params['data_params']['WTs']
+# Generation-time params, not part of checkpoint.py's trimmed inference-only
+# silex_params.json -- see invert_qc.py, which reads this same
+# training_data/<site>/params.json.
+with open(f'{paths.input}/training_data/{site}/params.json', 'r') as f:
+    data_params = load(f)
+    dz_soil = data_params['d_thickness']
+    dz_vel = data_params['dz']
+    max_z = data_params['max_depth']
+    soils = data_params['soils']
+    Ns = data_params['Ns']
+    WTs = data_params['WTs']
 ### -----------------------------------------------------------------------------------------------
 
 
@@ -94,12 +101,12 @@ elif len(periods) == 2:
     fig_VSs, axs_VSs = plt.subplots(11, 2, figsize=(18.4*CM, 28*CM), dpi=600, gridspec_kw={'hspace': 0.5, 'wspace': 0.1})
     fig_soil_N_entropy, axs_soil_N_entropy = plt.subplots(5, 2, figsize=(18.4*CM, 13*CM), dpi=600, gridspec_kw={'hspace': 0.5, 'wspace': 0.1})
 
-existing_results = sorted(os.listdir(f'{PATH_OUTPUT}/{model_id}/{site}/'))
+existing_results = sorted(os.listdir(f'{paths.output}/{model_id}/{site}/'))
 if 'results' in existing_results:
     existing_results.remove('results')
 
-if not os.path.exists(f"{PATH_OUTPUT}/{model_id}/{site}/results/"):
-    os.makedirs(f"{PATH_OUTPUT}/{model_id}/{site}/results/")
+if not os.path.exists(f"{paths.output}/{model_id}/{site}/results/"):
+    os.makedirs(f"{paths.output}/{model_id}/{site}/results/")
 
 if len(periods) == 1:
     name = f"[{periods[0][0]}_{periods[0][-1]}]"
@@ -108,8 +115,8 @@ elif len(periods) == 2:
 else:
     raise ValueError('Only 1 or 2 periods are allowed.')
     
-if not os.path.exists(f"{PATH_OUTPUT}/{model_id}/{site}/results/{name}/"):
-    os.makedirs(f"{PATH_OUTPUT}/{model_id}/{site}/results/{name}/")
+if not os.path.exists(f"{paths.output}/{model_id}/{site}/results/{name}/"):
+    os.makedirs(f"{paths.output}/{model_id}/{site}/results/{name}/")
     
 profiles = ['P1', 'P2', 'P3', 'P4', 'P5']
 Nprofiles = len(profiles)
@@ -131,7 +138,7 @@ for i_period, period in enumerate(periods):
     dates = dates[dates.isin(existing_results)]
     N_dates = len(dates)
     
-    xs = np.loadtxt(f"{PATH_OUTPUT}/{model_id}/{site}/{dates[0].strftime('%Y-%m-%d')}/{profiles[0]}/xs.txt")
+    xs = np.loadtxt(f"{paths.output}/{model_id}/{site}/{dates[0].strftime('%Y-%m-%d')}/{profiles[0]}/xs.txt")
     Nx = len(xs)
 
     soil_xyzt = np.full((Nx, Nprofiles, Nz_soil, N_dates), np.nan)
@@ -144,7 +151,7 @@ for i_period, period in enumerate(periods):
 
         for i_profile, profile in enumerate(profiles):
 
-            path = f"{PATH_OUTPUT}/{model_id}/{site}/{date.strftime('%Y-%m-%d')}/{profile}/"
+            path = f"{paths.output}/{model_id}/{site}/{date.strftime('%Y-%m-%d')}/{profile}/"
             if not os.path.exists(path):
                 SystemError(f'ERROR: {path} does not exist.')
 
@@ -558,7 +565,7 @@ for i_period, period in enumerate(periods):
     plotter.show_grid(n_ylabels=6, n_xlabels=2, n_zlabels=5, axes_ranges=[0, 129, 0, 25, -20, 0], bounds=[0, 129, 0, 25, -20, 0])
     plotter.show_axes()
     plotter.set_background(None, top=None)
-    plotter.save_graphic(f'{PATH_OUTPUT}/{model_id}/{site}/results/{name}/[{period[0]}_{period[-1]}]_soil_cube.svg')
+    plotter.save_graphic(f'{paths.output}/{model_id}/{site}/results/{name}/[{period[0]}_{period[-1]}]_soil_cube.svg')
     
     for i_soil, soil in enumerate(soils):
         channels = data.threshold([i_soil+1, i_soil+1])
@@ -574,7 +581,7 @@ for i_period, period in enumerate(periods):
         plotter.add_light(light)
         plotter.show_grid(n_ylabels=6, n_xlabels=2, n_zlabels=5, axes_ranges=[0, 129, 0, 25, -20, 0], bounds=[0, 129, 0, 25, -20, 0])
         plotter.show_axes()
-        plotter.save_graphic(f'{PATH_OUTPUT}/{model_id}/{site}/results/{name}/[{period[0]}_{period[-1]}]_soil_channel_{[soil]}.svg')
+        plotter.save_graphic(f'{paths.output}/{model_id}/{site}/results/{name}/[{period[0]}_{period[-1]}]_soil_channel_{[soil]}.svg')
     
     # slices = data.slice_orthogonal()
     slices = data.slice_along_axis(n=5, axis="y")
@@ -609,7 +616,7 @@ for i_period, period in enumerate(periods):
     plotter.add_light(light)
     plotter.show_grid(n_ylabels=5, n_xlabels=2, n_zlabels=5, axes_ranges=[0, 129, 0, 20, -20, 0])
     plotter.show_axes()
-    plotter.save_graphic(f'{PATH_OUTPUT}/{model_id}/{site}/results/{name}/[{period[0]}_{period[-1]}]_soil_slices.svg')
+    plotter.save_graphic(f'{paths.output}/{model_id}/{site}/results/{name}/[{period[0]}_{period[-1]}]_soil_slices.svg')
     
     
     
@@ -639,7 +646,7 @@ for i_period, period in enumerate(periods):
     plotter.add_light(light)
     plotter.show_grid(n_ylabels=6, n_xlabels=2, n_zlabels=5, axes_ranges=[0, 129, 0, 25, -20, 0], bounds=[0, 129, 0, 25, -20, 0])
     plotter.show_axes()
-    plotter.save_graphic(f'{PATH_OUTPUT}/{model_id}/{site}/results/{name}/[{period[0]}_{period[-1]}]_N_cube.svg')
+    plotter.save_graphic(f'{paths.output}/{model_id}/{site}/results/{name}/[{period[0]}_{period[-1]}]_N_cube.svg')
     
     for i_N, N in enumerate(Ns):
         channels = data.threshold([N, N])
@@ -655,7 +662,7 @@ for i_period, period in enumerate(periods):
         plotter.add_light(light)
         plotter.show_grid(n_ylabels=6, n_xlabels=2, n_zlabels=5, axes_ranges=[0, 129, 0, 25, -20, 0], bounds=[0, 129, 0, 25, -20, 0])
         plotter.show_axes()
-        plotter.save_graphic(f'{PATH_OUTPUT}/{model_id}/{site}/results/{name}/[{period[0]}_{period[-1]}]_N_channel_[{N}].svg')
+        plotter.save_graphic(f'{paths.output}/{model_id}/{site}/results/{name}/[{period[0]}_{period[-1]}]_N_channel_[{N}].svg')
     
     slices = data.slice_along_axis(n=5, axis="y")
     plotter = pv.Plotter(off_screen=True, window_size=window_size)
@@ -687,7 +694,7 @@ for i_period, period in enumerate(periods):
     plotter.add_light(light)
     plotter.show_grid(n_ylabels=5, n_xlabels=2, n_zlabels=5, axes_ranges=[0, 129, 0, 20, -20, 0])
     plotter.show_axes()
-    plotter.save_graphic(f'{PATH_OUTPUT}/{model_id}/{site}/results/{name}/[{period[0]}_{period[-1]}]_N_slices.svg')
+    plotter.save_graphic(f'{paths.output}/{model_id}/{site}/results/{name}/[{period[0]}_{period[-1]}]_N_slices.svg')
     
  
     mum_xyz = mum_xyz[:, :, ::-1]/1_000_000_000
@@ -729,7 +736,7 @@ for i_period, period in enumerate(periods):
     plotter.add_light(light)
     plotter.show_grid(n_ylabels=5, n_xlabels=2, n_zlabels=5, axes_ranges=[0, 126, 0, 19, -20, 0], bounds=[0, 126, 0, 19, -20, 0])
     plotter.show_axes()
-    plotter.save_graphic(f'{PATH_OUTPUT}/{model_id}/{site}/results/{name}/[{period[0]}_{period[-1]}]_mum_cube.svg')
+    plotter.save_graphic(f'{paths.output}/{model_id}/{site}/results/{name}/[{period[0]}_{period[-1]}]_mum_cube.svg')
     
     min = 0.1
     max = 0.16
@@ -747,7 +754,7 @@ for i_period, period in enumerate(periods):
     plotter.add_light(light)
     plotter.show_grid(n_ylabels=5, n_xlabels=2, n_zlabels=5, axes_ranges=[0, 126, 0, 19, -20, 0], bounds=[0, 126, 0, 19, -20, 0])
     plotter.show_axes()
-    plotter.save_graphic(f'{PATH_OUTPUT}/{model_id}/{site}/results/{name}/[{period[0]}_{period[-1]}]_mum_channels_[{min}-{max}].svg')
+    plotter.save_graphic(f'{paths.output}/{model_id}/{site}/results/{name}/[{period[0]}_{period[-1]}]_mum_channels_[{min}-{max}].svg')
     
     min = 0.27
     max = 0.4
@@ -766,7 +773,7 @@ for i_period, period in enumerate(periods):
     plotter.add_light(light)
     plotter.show_grid(n_ylabels=5, n_xlabels=2, n_zlabels=5, axes_ranges=[0, 126, 0, 19, -20, 0], bounds=[0, 126, 0, 19, -20, 0])
     plotter.show_axes()
-    plotter.save_graphic(f'{PATH_OUTPUT}/{model_id}/{site}/results/{name}/[{period[0]}_{period[-1]}]_mum_channels_[{min}-{max}].svg')
+    plotter.save_graphic(f'{paths.output}/{model_id}/{site}/results/{name}/[{period[0]}_{period[-1]}]_mum_channels_[{min}-{max}].svg')
     
     slices = data.slice_along_axis(n=5, axis="y")
     cmap = 'terrain'
@@ -782,7 +789,7 @@ for i_period, period in enumerate(periods):
     plotter.add_light(light)
     plotter.show_grid(n_ylabels=5, n_xlabels=2, n_zlabels=5, axes_ranges=[0, 126, 0, 19, -20, 0])
     plotter.show_axes()
-    plotter.save_graphic(f'{PATH_OUTPUT}/{model_id}/{site}/results/{name}/[{period[0]}_{period[-1]}]_mum_slices.svg')
+    plotter.save_graphic(f'{paths.output}/{model_id}/{site}/results/{name}/[{period[0]}_{period[-1]}]_mum_slices.svg')
 
 
 if len(periods) == 1:
@@ -802,7 +809,7 @@ if len(periods) == 2:
     axs_soils_Ns[6, 1].set_title(f"{datetime.strptime(periods[1][0], '%Y-%m-%d').strftime('%b %d, %Y')} - {datetime.strptime(periods[1][-1], '%Y-%m-%d').strftime('%b %d, %Y')}", fontsize=8, weight='bold', x=-0.055, y=1.8)
     axs_soils_Ns[5, 0].set_axis_off()
     axs_soils_Ns[5, 1].set_axis_off()
-fig_soils_Ns.savefig(f'{PATH_OUTPUT}/{model_id}/{site}/results/{name}/{name}_soil_N.svg', bbox_inches='tight')
+fig_soils_Ns.savefig(f'{paths.output}/{model_id}/{site}/results/{name}/{name}_soil_N.svg', bbox_inches='tight')
 
 
 if len(periods) == 1:
@@ -815,7 +822,7 @@ if len(periods) == 1:
 elif len(periods) == 2:
     axs_mums[0, 1].set_title(f"{datetime.strptime(periods[0][0], '%Y-%m-%d').strftime('%b %d, %Y')} - {datetime.strptime(periods[0][-1], '%Y-%m-%d').strftime('%b %d, %Y')}                              {datetime.strptime(periods[1][0], '%Y-%m-%d').strftime('%b %d, %Y')} - {datetime.strptime(periods[1][-1], '%Y-%m-%d').strftime('%b %d, %Y')}",
                           fontsize=8, weight='bold', x=-0.06, y=1.9)
-fig_soil_N_entropy.savefig(f'{PATH_OUTPUT}/{model_id}/{site}/results/{name}/{name}_soil_N_WT_entropy.svg', bbox_inches='tight')
+fig_soil_N_entropy.savefig(f'{paths.output}/{model_id}/{site}/results/{name}/{name}_soil_N_WT_entropy.svg', bbox_inches='tight')
 
 
 if len(periods) == 1:
@@ -830,7 +837,7 @@ if len(periods) == 1:
 elif len(periods) == 2:
     axs_mums[0, 1].set_title(f"{datetime.strptime(periods[0][0], '%Y-%m-%d').strftime('%b %d, %Y')} - {datetime.strptime(periods[0][-1], '%Y-%m-%d').strftime('%b %d, %Y')}                              {datetime.strptime(periods[1][0], '%Y-%m-%d').strftime('%b %d, %Y')} - {datetime.strptime(periods[1][-1], '%Y-%m-%d').strftime('%b %d, %Y')}",
                           fontsize=8, weight='bold', x=-0.06, y=1.9)
-fig_mums.savefig(f'{PATH_OUTPUT}/{model_id}/{site}/results/{name}/{name}_mum.svg', bbox_inches='tight')
+fig_mums.savefig(f'{paths.output}/{model_id}/{site}/results/{name}/{name}_mum.svg', bbox_inches='tight')
 
 
 if len(periods) == 1:
@@ -846,7 +853,7 @@ if len(periods) == 2:
     axs_VSs[6, 1].set_title(f"{datetime.strptime(periods[1][0], '%Y-%m-%d').strftime('%b %d, %Y')} - {datetime.strptime(periods[1][-1], '%Y-%m-%d').strftime('%b %d, %Y')}", fontsize=8, weight='bold', x=-0.055, y=1.8)
     axs_VSs[5, 0].set_axis_off()
     axs_VSs[5, 1].set_axis_off()
-fig_VSs.savefig(f'{PATH_OUTPUT}/{model_id}/{site}/results/{name}/{name}_Vs.svg', bbox_inches='tight')
+fig_VSs.savefig(f'{paths.output}/{model_id}/{site}/results/{name}/{name}_Vs.svg', bbox_inches='tight')
 
 
 plt.close('all')
