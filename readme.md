@@ -1,5 +1,8 @@
 # silex — Surface wave Inversion Lexicon
 
+[![DOI](https://img.shields.io/badge/DOI-10.1029%2F2025GL114852-blue)](https://doi.org/10.1029/2025GL114852)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 ![Git_NLP_Passive](https://github.com/user-attachments/assets/a6935f75-98c6-4dba-aeee-8822e8e33ee0)
 
 **silex** solves petrophysical inversion of surface-wave dispersion curves with a
@@ -18,17 +21,11 @@ Sorbonne Université and Mines Paris - PSL. Paper: [Cunha Teixeira et al.,
 If you use this software, please cite the paper above (full metadata in
 [CITATION.cff](CITATION.cff)):
 
-```bibtex
-@article{cunhateixeira2025silex,
-  title   = {Neural Machine Translation of Seismic Ambient Noise for Soil Nature and Water Saturation Characterization},
-  author  = {Cunha Teixeira, Jos\'{e} and Bodet, Ludovic and Rivi\`{e}re, Agn\`{e}s and Solazzi, Santiago G. and Hallier, Am\'{e}lie and Gesret, Alexandrine and El Janyani, Sanae and Dangeard, Marine and Dhemaied, Amine and Boisson Gaboriau, Jos\'{e}phine},
-  journal = {Geophysical Research Letters},
-  volume  = {52},
-  number  = {13},
-  year    = {2025},
-  doi     = {10.1029/2025GL114852}
-}
-```
+> Cunha Teixeira, J., Bodet, L., Rivière, A., Solazzi, S. G., Hallier, A., Gesret, A.,
+> El Janyani, S., Dangeard, M., Dhemaied, A., & Boisson Gaboriau, J. (2025). Neural
+> Machine Translation of Seismic Ambient Noise for Soil Nature and Water Saturation
+> Characterization. *Geophysical Research Letters*, *52*(13), e2025GL114852.
+> https://doi.org/10.1029/2025GL114852
 
 ![Screenshot from 2024-07-08 15-18-04](https://github.com/JoseCunhaTeixeira/Trasnformer_SW_inversion/assets/148117375/074bd457-1acf-40c9-8ae7-ea47b9027de7)
 
