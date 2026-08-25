@@ -2,6 +2,7 @@
 
 [![DOI](https://img.shields.io/badge/DOI-10.1029%2F2025GL114852-blue)](https://doi.org/10.1029/2025GL114852)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python >=3.10](https://img.shields.io/badge/Python-%3E%3D3.10-blue.svg)](pyproject.toml)
 
 ![Git_NLP_Passive](https://github.com/user-attachments/assets/a6935f75-98c6-4dba-aeee-8822e8e33ee0)
 
