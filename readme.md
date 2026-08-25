@@ -13,6 +13,23 @@ This project is part of José Cunha Teixeira's PhD developments at SNCF Réseau,
 Sorbonne Université and Mines Paris - PSL. Paper: [Cunha Teixeira et al.,
 2025](https://doi.org/10.1029/2025GL114852).
 
+## Citation
+
+If you use this software, please cite the paper above (full metadata in
+[CITATION.cff](CITATION.cff)):
+
+```bibtex
+@article{cunhateixeira2025silex,
+  title   = {Neural Machine Translation of Seismic Ambient Noise for Soil Nature and Water Saturation Characterization},
+  author  = {Cunha Teixeira, Jos\'{e} and Bodet, Ludovic and Rivi\`{e}re, Agn\`{e}s and Solazzi, Santiago G. and Hallier, Am\'{e}lie and Gesret, Alexandrine and El Janyani, Sanae and Dangeard, Marine and Dhemaied, Amine and Boisson Gaboriau, Jos\'{e}phine},
+  journal = {Geophysical Research Letters},
+  volume  = {52},
+  number  = {13},
+  year    = {2025},
+  doi     = {10.1029/2025GL114852}
+}
+```
+
 ![Screenshot from 2024-07-08 15-18-04](https://github.com/JoseCunhaTeixeira/Trasnformer_SW_inversion/assets/148117375/074bd457-1acf-40c9-8ae7-ea47b9027de7)
 
 ![image](https://github.com/JoseCunhaTeixeira/Trasnformer_SW_inversion/assets/148117375/ba5a8a20-7c00-49be-9095-3487d9df0950)
@@ -111,3 +128,7 @@ npx --yes pyright         # strict type checking (src/, scripts/, experiments/)
 uvx ruff check .
 uvx ruff format .
 ```
+
+## License
+
+MIT — see [LICENSE](LICENSE).

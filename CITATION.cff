@@ -1,0 +1,41 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "silex — Surface wave Inversion Lexicon"
+type: software
+authors:
+  - family-names: "Cunha Teixeira"
+    given-names: "José"
+    email: jose.cunha-teixeira@protonmail.com
+repository-code: "https://github.com/JoseCunhaTeixeira/silex"
+license: MIT
+version: 1.0.0
+preferred-citation:
+  type: article
+  title: "Neural Machine Translation of Seismic Ambient Noise for Soil Nature and Water Saturation Characterization"
+  authors:
+    - family-names: "Cunha Teixeira"
+      given-names: "José"
+    - family-names: "Bodet"
+      given-names: "Ludovic"
+    - family-names: "Rivière"
+      given-names: "Agnès"
+    - family-names: "Solazzi"
+      given-names: "Santiago G."
+    - family-names: "Hallier"
+      given-names: "Amélie"
+    - family-names: "Gesret"
+      given-names: "Alexandrine"
+    - family-names: "El Janyani"
+      given-names: "Sanae"
+    - family-names: "Dangeard"
+      given-names: "Marine"
+    - family-names: "Dhemaied"
+      given-names: "Amine"
+    - family-names: "Boisson Gaboriau"
+      given-names: "Joséphine"
+  journal: "Geophysical Research Letters"
+  volume: 52
+  issue: 13
+  year: 2025
+  doi: "10.1029/2025GL114852"
+  url: "https://doi.org/10.1029/2025GL114852"
