@@ -1,9 +1,11 @@
 """Generate synthetic training data: random soil profiles forward-modeled
-(Santiludo rock physics + gpdc dispersion) into (dispersion curve, tokenized
+(Santiludo rock physics + dispersion) into (dispersion curve, tokenized
 profile) pairs, written under Paths.input/training_data/<site>/.
 
-Needs Santiludo_layered built and installed (see repo README) and `gpdc`
-(https://www.geopsy.org) on PATH.
+Needs Santiludo built and installed (see repo README). Dispersion defaults
+to santiludo's pure-Python `disba` backend; pass
+`GenerationConfig(backend="gpdc", ...)` to use the Geopsy `gpdc` binary
+(https://www.geopsy.org) instead, which then must be on PATH.
 
 Run from the repo root: python scripts/1_generate_data.py
 """

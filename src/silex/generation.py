@@ -1,12 +1,24 @@
 """Synthetic training-data generation: sample random soil profiles,
-forward-model them (Santiludo rock physics + gpdc dispersion), and write
+forward-model them (Santiludo rock physics + dispersion), and write
 the (dispersion curve, tokenized profile) pairs data.py/vocab.py read.
 
-A typed port of 1_run_data_generation.py's core loop. Two concrete fixes
-along the way: `n_models` is now a required parameter (the original had a
+A typed port of 1_run_data_generation.py's core loop. Concrete fixes along
+the way: `n_models` is now a required parameter (the original had a
 literal `N_models = None`, which crashed `while i < N_models` on the very
-first iteration -- must have been a placeholder never filled in), and the
-gpdc subprocess call no longer uses shell=True.
+first iteration -- must have been a placeholder never filled in); the
+dispersion computation now goes through santiludo's public
+`compute_rock_physics`/`compute_seismic_forward` API instead of hand-rolling
+calls into its low-level compiled modules and our own `gpdc` subprocess
+call (santiludo now owns that, selectable via `GenerationConfig.backend`
+-- `"disba"`, the default, is a pure-Python dependency of santiludo itself
+and needs no external binary; `"gpdc"` is still available opt-in and needs
+the Geopsy binary on PATH); and, as a side effect of that switch,
+`_forward_model` no longer passes `frac` as a single
+`config.frac * len(soils)` scalar into the Hertz-Mindlin frame computation
+(santiludo's low-level `hertzMindlin` indexes `fracs` per layer -- this was
+a pre-existing bug, confirmed against `invert_qc.py`'s own already-correct
+`fracs = [0.3] * len(soil_types)`) -- santiludo's `Layer.frac` is now set
+per layer instead.
 
 Needs the optional `generation` extra (`uv sync --extra generation`),
 which pulls in `santiludo @ git+https://github.com/JoseCunhaTeixeira/santiludo.git`
@@ -15,12 +27,9 @@ extension (building it needs a C++ toolchain; on Windows specifically,
 MSVC via Visual Studio Build Tools' "Desktop development with C++"
 workload -- without it the build fails with "Unable to find a compatible
 Visual Studio installation", same as it would for any other
-compiled-extension dependency). `from santiludo.VGfunctions import vanGen`
-etc. calls the same compiled functions the original script imported via
-its hardcoded `sys.path.append(...)` + `from lib.VGfunctions import
-vanGen` -- same functions, same signatures, just under the package's real
-name now that it's a proper distribution instead of a bare `lib/` folder
-on someone's machine.
+compiled-extension dependency). The santiludo import itself stays deferred
+to inside `_forward_model()` so that importing this module doesn't require
+the extra to be installed.
 """
 
 from __future__ import annotations
@@ -28,10 +37,10 @@ from __future__ import annotations
 import json
 import logging
 import random
+import shutil
 from dataclasses import dataclass, field
-from io import StringIO
 from pathlib import Path
-from subprocess import CalledProcessError, run
+from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -90,22 +99,33 @@ class GenerationConfig:
     """Fraction of non-slipping grains per layer (Hertz-Mindlin)."""
 
     dz: float = 0.1
-    """Depth sample interval [m]. Halved by 10x on repeated gpdc failures
-    for a given sample, then reset for the next one."""
+    """Depth sample interval [m]. Halved by 10x on repeated dispersion
+    failures for a given sample, then reset for the next one."""
     min_dz: float = 0.001
     """Give up shrinking dz below this and skip the sample."""
 
     under_layers: str = "5 2000 1000 2000\n0 4000 2000 2500\n"
-    """GPDC-format substratum layers under the generated soil column."""
+    """GPDC-format substratum layers under the generated soil column.
+    Kept as this string (rather than a list of santiludo.UnderLayer) so
+    that this module stays importable without santiludo installed, and so
+    params.json's on-disk format (read by invert_qc.py) doesn't change --
+    parsed into santiludo.UnderLayer inside _forward_model instead."""
 
     d_freq: float = 1.0
     min_freq: float = 5.0
     max_freq: float = 100.0
     n_modes: int = 1
     wave: str = "R"
-    """gpdc wave type flag: "R" for Rayleigh, "L" for Love."""
+    """Wave type: "R" for Rayleigh, "L" for Love."""
     frequency_domain: str = "frequency"
-    """gpdc -s flag: sample over "frequency" or "wavelength"."""
+    """Sampling mode: "frequency" or "wavelength" (gpdc backend only --
+    santiludo's disba backend only supports frequency sampling)."""
+
+    backend: Literal["gpdc", "disba"] = "disba"
+    """Dispersion-curve computation backend. "disba" (default) is a
+    pure-Python dependency of santiludo itself -- no external binary
+    needed. "gpdc" shells out to the Geopsy binary, which must be on
+    PATH."""
 
     rock_physics: RockPhysicsConstants = field(default_factory=RockPhysicsConstants)
 
@@ -179,100 +199,86 @@ def _forward_model(
     dz: float,
     config: GenerationConfig,
 ) -> NDArray[np.float64]:
-    """Santiludo rock physics -> GPDC dispersion, for one soil profile at
-    one dz. Raises CalledProcessError if gpdc can't resolve a curve at
-    this dz (the caller retries at a finer dz)."""
+    """Santiludo rock physics -> dispersion curve, for one soil profile at
+    one dz. Raises RuntimeError if the dispersion curve can't be resolved
+    at this dz (the caller retries at a finer dz)."""
     # santiludo's compiled extension modules need a C++ toolchain to build
     # (see the module docstring) -- an environment without one still fails
     # to resolve this import even though it's a normal pyproject.toml
     # dependency, hence the ignore rather than that being a real error here.
-    from santiludo.RPfunctions import (  # pyright: ignore[reportMissingImports]
-        biotGassmann,
-        effFluid,
-        hertzMindlin,
-        hillsAverage,
+    from santiludo import (  # pyright: ignore[reportMissingImports]
+        DispersionConfig,
+        FluidProperties,
+        GrainProperties,
+        Layer,
+        UnderLayer,
+        compute_rock_physics,
+        compute_seismic_forward,
     )
-    from santiludo.TTDSPfunctions import (  # pyright: ignore[reportMissingImports]
-        readDispersion,
-        writeVelocityModel,
-    )
-    from santiludo.VGfunctions import vanGen  # pyright: ignore[reportMissingImports]
 
     rp = config.rock_physics
-    top_surface_level = dz
-    depth = float(np.sum(thicknesses))
-    zs = -np.arange(top_surface_level, depth + dz, dz)
-    vm_thicknesses = np.diff(np.abs(zs))
-    fracs = config.frac * len(soils)
-
-    h, sw, swe = vanGen(zs, water_table_depth, soils, thicknesses)
-    mus, ks, rhos, nus = hillsAverage(
-        rp.mu_clay,
-        rp.mu_silt,
-        rp.mu_sand,
-        rp.rho_clay,
-        rp.rho_silt,
-        rp.rho_sand,
-        rp.k_clay,
-        rp.k_silt,
-        rp.k_sand,
-        soils,
-    )
-    # rhof (effective fluid density) is part of effFluid's return signature
-    # but unused downstream -- matches the original script exactly.
-    kf, _rhof, rhob = effFluid(
-        sw, rp.k_water, rp.k_air, rp.rho_water, rp.rho_air, rhos, soils, thicknesses, dz
-    )
-    k_hm, mu_hm = hertzMindlin(
-        swe,
-        zs,
-        h,
-        rhob,
-        rp.gravity,
-        rp.rho_air,
-        rp.rho_water,
-        n_values,
-        mus,
-        nus,
-        fracs,
-        rp.pressure_model,
-        soils,
-        thicknesses,
-    )
-    vp, vs = biotGassmann(k_hm, mu_hm, ks, kf, rhob, soils, thicknesses, dz)
-
-    velocity_model_string = writeVelocityModel(
-        vm_thicknesses, vp, vs, rhob, config.under_layers, config.under_layers.count("\n")
-    )
-    n_freqs = int((config.max_freq - config.min_freq) / config.d_freq) + 1
-    gpdc_args = [
-        "gpdc",
-        f"-{config.wave}",
-        str(config.n_modes),
-        "-n",
-        str(n_freqs),
-        "-min",
-        str(config.min_freq),
-        "-max",
-        str(config.max_freq),
-        "-s",
-        config.frequency_domain,
-        "-j",
-        "1",
+    layers = [
+        Layer(soiltype=soil, thickness=thickness, N=n, frac=config.frac)
+        for soil, thickness, n in zip(soils, thicknesses, n_values, strict=True)
     ]
-    process = run(
-        gpdc_args,
-        input=StringIO(velocity_model_string).getvalue(),
-        text=True,
-        shell=False,
-        capture_output=True,
-        check=True,
+    rock_physics = compute_rock_physics(
+        layers,
+        WT=water_table_depth,
+        dz=dz,
+        kk=rp.pressure_model,
+        grain_properties=GrainProperties(
+            mu_clay=rp.mu_clay,
+            mu_silt=rp.mu_silt,
+            mu_sand=rp.mu_sand,
+            k_clay=rp.k_clay,
+            k_silt=rp.k_silt,
+            k_sand=rp.k_sand,
+            rho_clay=rp.rho_clay,
+            rho_silt=rp.rho_silt,
+            rho_sand=rp.rho_sand,
+        ),
+        fluid_properties=FluidProperties(
+            rhow=rp.rho_water, rhoa=rp.rho_air, kw=rp.k_water, ka=rp.k_air
+        ),
+        g=rp.gravity,
     )
-    dispersion_data, _n_modes = readDispersion(process.stdout)
-    return np.asarray(dispersion_data[0][:, 1], dtype=np.float64)
+
+    # config.under_layers stays the GPDC-format string (see its docstring)
+    # -- parsed into santiludo.UnderLayer here, where the deferred
+    # santiludo import already lives.
+    under_layers = tuple(
+        UnderLayer(*(float(v) for v in line.split()))
+        for line in config.under_layers.splitlines()
+        if line.strip()
+    )
+
+    n_freqs = int((config.max_freq - config.min_freq) / config.d_freq) + 1
+    dispersion = DispersionConfig(
+        nf=n_freqs,
+        df=config.d_freq,
+        min_f=config.min_freq,
+        n_modes=config.n_modes,
+        wave=config.wave,
+        mode=config.frequency_domain,
+        backend=config.backend,
+    )
+
+    result = compute_seismic_forward(rock_physics, under_layers=under_layers, dispersion=dispersion)
+    if not result.dispersion_data:
+        raise RuntimeError("no dispersion mode resolved at this dz")
+    return np.asarray(result.dispersion_data[0][:, 1], dtype=np.float64)
 
 
 def generate_samples(config: GenerationConfig, seed: int | None = None) -> list[GeneratedSample]:
+    # Fail fast rather than letting every sample burn through the dz-shrink
+    # retry loop below for a cause (missing binary) more dz won't fix.
+    if config.backend == "gpdc" and shutil.which("gpdc") is None:
+        raise RuntimeError(
+            "GenerationConfig.backend='gpdc' but the 'gpdc' executable was not "
+            "found on PATH (https://www.geopsy.org). Install it, or use "
+            "backend='disba' (the default) to avoid this dependency."
+        )
+
     rng = random.Random(seed)
     samples: list[GeneratedSample] = []
 
@@ -294,11 +300,11 @@ def generate_samples(config: GenerationConfig, seed: int | None = None) -> list[
                     curve = _forward_model(
                         soils, thicknesses, n_values, water_table_depth, dz, config
                     )
-                except CalledProcessError:
+                except RuntimeError:
                     dz /= 10
                     if dz < config.min_dz:
                         logger.warning(
-                            "Skipping sample (gpdc kept failing down to dz=%s): "
+                            "Skipping sample (dispersion kept failing down to dz=%s): "
                             "soils=%s thicknesses=%s n=%s wt=%s",
                             dz,
                             soils,

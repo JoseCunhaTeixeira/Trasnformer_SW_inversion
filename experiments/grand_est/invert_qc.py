@@ -1,6 +1,6 @@
 """Grand_Est site QC pipeline: run the trained model on real field
-dispersion curves, then Santiludo rock physics + GPDC re-forward-model the
-decoded soil profile to check how well it reproduces the observed curve
+dispersion curves, then Santiludo rock physics + dispersion re-forward-model
+the decoded soil profile to check how well it reproduces the observed curve
 (RMS/NRMS), writing per-profile depth sections (soil, N, WT, h, Sw, Swe,
 mus, Ks, rhos, nus, Kf, rhof, rhob, Km, mum, Vp, Vs, Vr) that
 plot_inversion.py/plot_dispersion.py/plot_WT.py/print_rms.py read.
@@ -22,6 +22,12 @@ the original was resliced, this one silently wasn't) and a bare `sys.exit`
 "run on CPUs" block is dropped (this repo runs on a torch backend, and
 TensorFlow isn't a dependency here at all -- see silex/__init__.py).
 
+Later migrated (alongside generation.py) to santiludo's public
+compute_rock_physics/compute_seismic_forward API instead of its low-level
+compiled modules plus our own gpdc subprocess call -- santiludo now owns
+the dispersion backend choice (`backend` below: "disba", pure-Python, no
+PATH dependency; or "gpdc", the Geopsy binary on PATH as before).
+
 Run from the repo root: python experiments/grand_est/invert_qc.py
 
 Author : Jose CUNHA TEIXEIRA
@@ -30,36 +36,34 @@ License : SNCF Reseau, UMR 7619 METIS, Sorbonne Universite
 
 import json
 import os
+import shutil
 import sys
-from io import StringIO
-from subprocess import CalledProcessError, run
+from typing import Literal
 
 import numpy as np
 import pandas as pd
-from scipy.signal import savgol_filter
-from tqdm import tqdm
-
 from _legacy_utils import resample_legacy as resamp
-from silex.checkpoint import load_checkpoint
-from silex.config import Paths
-from silex.decoding import decode
 
 # santiludo's compiled extension modules need a C++ toolchain to build
 # (see generation.py's module docstring) -- an environment without one
 # still fails to resolve this import even though it's a normal optional
 # dependency (`uv sync --extra generation`), hence the ignore rather than
 # that being a real error here.
-from santiludo.RPfunctions import (  # pyright: ignore[reportMissingImports]
-    biotGassmann,
-    effFluid,
-    hertzMindlin,
-    hillsAverage,
+from santiludo import (  # pyright: ignore[reportMissingImports]
+    DispersionConfig,
+    FluidProperties,
+    GrainProperties,
+    Layer,
+    UnderLayer,
+    compute_rock_physics,
+    compute_seismic_forward,
 )
-from santiludo.TTDSPfunctions import (  # pyright: ignore[reportMissingImports]
-    readDispersion,
-    writeVelocityModel,
-)
-from santiludo.VGfunctions import vanGen  # pyright: ignore[reportMissingImports]
+from scipy.signal import savgol_filter
+from tqdm import tqdm
+
+from silex.checkpoint import load_checkpoint
+from silex.config import Paths
+from silex.decoding import decode
 
 cm = 1 / 2.54
 
@@ -113,15 +117,22 @@ pad_id = word_to_index["[PAD]"]
 with open(f"{paths.input}/training_data/{site}/params.json") as f:
     data_params = json.load(f)
 
-# Under layers
-under_layers = data_params["under_layers"]
-N_under_layers = data_params["N_under_layers"]
+# Under layers -- params.json still stores these in GPDC-format string form
+# (generation.py kept that format for back-compat with datasets generated
+# before santiludo's backend switch); parsed once here into UnderLayer,
+# loop-invariant across all profiles/files below.
+under_layers = tuple(
+    UnderLayer(*(float(v) for v in line.split()))
+    for line in data_params["under_layers"].splitlines()
+    if line.strip()
+)
 
 # Geometry and discretisation of the medium
 dz_origin = data_params["dz"]  # Depth sample interval [m]
 dz = dz_origin
-top_surface_level_origin = data_params["top_surface_level"]  # Altitude of the soil surface[m]
-top_surface_level = top_surface_level_origin
+# compute_rock_physics fixes its internal top_surface_level == dz, which
+# always holds here too (generation.py's params.json sets both to the same
+# config.dz) -- no separate top_surface_level tracking needed any more.
 
 n_modes = data_params["n_modes"]  # Number of modes to compute
 ### -----------------------------------------------------------------------------------------------
@@ -153,7 +164,17 @@ kk = 3  # Pe with suction (cf. Solazzi et al. 2021)
 ### SEISMIC CONSTANTS -----------------------------------------------------------------------------
 s = "frequency"  # Over frequencies mode
 wave = "R"  # Rayleigh (PSV) fundamental mode
+backend: Literal["gpdc", "disba"] = "disba"  # "disba" (pure-Python) or "gpdc" (needs PATH binary)
+
+d_freq = (max_freq - min_freq) / (N_freqs - 1)  # [Hz]
 ### -----------------------------------------------------------------------------------------------
+
+if backend == "gpdc" and shutil.which("gpdc") is None:  # pyright: ignore[reportUnnecessaryComparison]
+    print(
+        "ERROR: backend='gpdc' but the 'gpdc' executable was not found on PATH "
+        "(https://www.geopsy.org). Install it, or use backend='disba' instead."
+    )
+    sys.exit(1)
 
 
 for profile, dx in tqdm(zip(profiles, dxs, strict=True), total=len(profiles), desc="Profiles", colour="green"):
@@ -205,7 +226,6 @@ for profile, dx in tqdm(zip(profiles, dxs, strict=True), total=len(profiles), de
         flag = False
         if dz != dz_origin:
             dz = dz_origin
-            top_surface_level = top_surface_level_origin
             print(f"INFO : dz reset at {dz_origin}\n")
 
         while computed is False:
@@ -246,9 +266,7 @@ for profile, dx in tqdm(zip(profiles, dxs, strict=True), total=len(profiles), de
 
             WT = float(decoded_GM[1])
 
-            fracs = [0.3] * len(soil_types)
-
-            depth = np.sum(GM_thicknesses)
+            frac = 0.3
 
             for soil in soil_types:
                 if soil not in data_params["soils"]:
@@ -256,81 +274,49 @@ for profile, dx in tqdm(zip(profiles, dxs, strict=True), total=len(profiles), de
                     sys.exit()
             ### ---------------------------------------------------------------------------------------
 
-            ### ROCK PHYSICS CONSTANTS ----------------------------------------------------------------
-            zs = -np.arange(top_surface_level, depth + dz, dz)  # Depth positions (negative downward) [m]
-
-            NbCells = len(zs) - 1  # Number of exploration points in depth [#]
-            ### ---------------------------------------------------------------------------------------
-
-            ### SEISMIC CONSTANTS ---------------------------------------------------------------------
-            VM_thicknesses = np.diff(np.abs(zs))  # thickness vector [m]
-            ### ---------------------------------------------------------------------------------------
-
-            #### ROCK PHYSICS -------------------------------------------------------------------------
-            # Saturation profile with depth
-            h_z, Sw_z, Swe_z = vanGen(zs, WT, soil_types, GM_thicknesses)
-
-            # Effective Grain Properties (constant with depth)
-            mus_z, Ks_z, rhos_z, nus_z = hillsAverage(
-                mu_clay, mu_silt, mu_sand, rho_clay, rho_silt, rho_sand, k_clay, k_silt, k_sand, soil_types
-            )
-
-            # Effective Fluid Properties
-            Kf_z, rhof_z, rhob_z = effFluid(Sw_z, kw, ka, rhow, rhoa, rhos_z, soil_types, GM_thicknesses, dz)
-
-            # Hertz Mindlin Frame Properties
-            Km_z, mum_z = hertzMindlin(
-                Swe_z, zs, h_z, rhob_z, g, rhoa, rhow, Ns, mus_z, nus_z, fracs, kk, soil_types, GM_thicknesses
-            )
-
-            # Saturated Properties
-            Vp_z, Vs_z = biotGassmann(Km_z, mum_z, Ks_z, Kf_z, rhob_z, soil_types, GM_thicknesses, dz)
-            ### ---------------------------------------------------------------------------------------
-
-            #### SEISMIC FWD MODELING -----------------------------------------------------------------
-            # Velocity model in string format for GPDC
-            velocity_model_string = writeVelocityModel(
-                VM_thicknesses, Vp_z, Vs_z, rhob_z, under_layers, N_under_layers
-            )
-
-            # Dispersion curves computing with GPDC
-            velocity_model_RAMfile = StringIO(
-                velocity_model_string
-            )  # Keep velocity model string in the RAM in a file format alike to trick GPDC which expects a file
-            gpdc_args = [
-                "gpdc",
-                f"-{wave}",
-                str(n_modes),
-                "-n",
-                str(N_freqs),
-                "-min",
-                str(min_freq),
-                "-max",
-                str(max_freq),
-                "-s",
-                s,
+            #### ROCK PHYSICS + SEISMIC FWD MODELING -------------------------------------------------
+            layers = [
+                Layer(soiltype=soil, thickness=thickness, N=n, frac=frac)
+                for soil, thickness, n in zip(soil_types, GM_thicknesses, Ns, strict=True)
             ]
+            rock_physics = compute_rock_physics(
+                layers,
+                WT=WT,
+                dz=dz,
+                kk=kk,
+                grain_properties=GrainProperties(
+                    mu_clay=mu_clay,
+                    mu_silt=mu_silt,
+                    mu_sand=mu_sand,
+                    k_clay=k_clay,
+                    k_silt=k_silt,
+                    k_sand=k_sand,
+                    rho_clay=rho_clay,
+                    rho_silt=rho_silt,
+                    rho_sand=rho_sand,
+                ),
+                fluid_properties=FluidProperties(rhow=rhow, rhoa=rhoa, kw=kw, ka=ka),
+                g=g,
+            )
+
+            dispersion = DispersionConfig(
+                nf=N_freqs, df=d_freq, min_f=min_freq, n_modes=n_modes, wave=wave, mode=s, backend=backend
+            )
 
             try:
-                process = run(
-                    gpdc_args,
-                    input=velocity_model_RAMfile.getvalue(),
-                    text=True,
-                    shell=False,
-                    capture_output=True,
-                    check=True,
-                )  # Raw output string from GPDC
-            except CalledProcessError as e:
-                print(f"\nERROR during GPDC computation. Returned:\n{e.stdout}")
+                result = compute_seismic_forward(rock_physics, under_layers=under_layers, dispersion=dispersion)
+                if not result.dispersion_data:
+                    raise RuntimeError("no dispersion mode resolved at this dz")
+            except RuntimeError as e:
+                print(f"\nERROR during dispersion computation: {e}")
                 print("Used parameters:")
                 print(f"{soil_types = }")
                 print(f"{GM_thicknesses = }")
                 print(f"{Ns = }")
-                print(f"{fracs = }")
+                print(f"{frac = }")
                 print(f"{WT = }")
                 print(f"{dz = }\n")
                 dz /= 10
-                top_surface_level /= 10
                 print(f"INFO : dz reduced at {dz}\n")
                 if dz > 0.001:
                     continue
@@ -342,10 +328,7 @@ for profile, dx in tqdm(zip(profiles, dxs, strict=True), total=len(profiles), de
             computed = True
 
             if not flag:
-                gpdc_output_string = process.stdout  # Raw output string from GPDC
-                dispersion_data, n_modes = readDispersion(
-                    gpdc_output_string
-                )  # Reads GPDC output and converts dispersion data to a list of numpy arrays for each mode
+                dispersion_data, n_modes = result.dispersion_data, result.n_modes
                 # Updates number of computed modes (can be lower than what was defined if frequency range too small)
             flag = False
 
@@ -353,17 +336,21 @@ for profile, dx in tqdm(zip(profiles, dxs, strict=True), total=len(profiles), de
             nrms = rms / (np.max(Vr_obs_comp) - np.min(Vr_obs_comp))
 
             factor = int(dz_origin / dz)
-            zs = zs[::factor]
-            h_z = h_z[::factor]
-            Sw_z = Sw_z[::factor]
-            Swe_z = Swe_z[::factor]
-            Kf_z = Kf_z[::factor]
-            rhof_z = rhof_z[::factor]
-            rhob_z = rhob_z[::factor]
-            Km_z = Km_z[::factor]
-            mum_z = mum_z[::factor]
-            Vp_z = Vp_z[::factor]
-            Vs_z = Vs_z[::factor]
+            zs = rock_physics.zs[::factor]
+            h_z = rock_physics.hs[::factor]
+            Sw_z = rock_physics.Sws[::factor]
+            Swe_z = rock_physics.Swes[::factor]
+            mus_z = rock_physics.mus
+            Ks_z = rock_physics.ks
+            rhos_z = rock_physics.rhos
+            nus_z = rock_physics.nus
+            Kf_z = rock_physics.kfs[::factor]
+            rhof_z = rock_physics.rhofs[::factor]
+            rhob_z = rock_physics.rhobs[::factor]
+            Km_z = rock_physics.KHMs[::factor]
+            mum_z = rock_physics.muHMs[::factor]
+            Vp_z = rock_physics.VPs[::factor]
+            Vs_z = rock_physics.VSs[::factor]
 
             thick_zx.append(GM_thicknesses)
             soil_zx.append(soil_types)

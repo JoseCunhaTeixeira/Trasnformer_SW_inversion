@@ -77,8 +77,11 @@ uv sync --extra paper_figures   # experiments/grand_est/plot_paper_figures.py
 compiled Cython/C++ rock-physics package. Building it needs a C++ toolchain -- on
 Windows specifically, MSVC via Visual Studio Build Tools' "Desktop development with
 C++" workload; without it `uv sync --extra generation` fails with "Unable to find a
-compatible Visual Studio installation." Data generation also needs the `gpdc`
-CLI binary from [Geopsy](https://www.geopsy.org) on `PATH`.
+compatible Visual Studio installation." Dispersion-curve computation defaults to
+santiludo's `disba` backend (pure Python, installed automatically as one of
+santiludo's own dependencies -- no extra setup). The `gpdc` CLI binary from
+[Geopsy](https://www.geopsy.org) is only needed if you opt into the `gpdc` backend
+(`GenerationConfig(backend="gpdc")`), in which case it must be on `PATH`.
 
 ## Configuration
 
