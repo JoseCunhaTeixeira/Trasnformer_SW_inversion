@@ -35,7 +35,6 @@ License : SNCF Reseau, UMR 7619 METIS, Sorbonne Universite
 """
 
 import json
-import os
 import shutil
 import sys
 from typing import Literal
@@ -83,13 +82,13 @@ model, checkpoint_params = load_checkpoint(paths.models / model_id)
 
 
 ### PROFILES TO INVERT ----------------------------------------------------------------------------
-dates = os.listdir(f"{paths.input}/real_data/{site}/")
+dates = [p.name for p in (paths.input / "real_data" / site).iterdir()]
 dates = sorted(dates)
 profiles = []
 for date in dates:
     year, month, day = date.split("-")
     if year in ["2022", "2023"] and month in ["07"]:  ### <- Change this line to select the desired dates
-        list_profiles = os.listdir(f"{paths.input}/real_data/{site}/{date}/")
+        list_profiles = [p.name for p in (paths.input / "real_data" / site / date).iterdir()]
         list_profiles = sorted(list_profiles)
         profiles += [f"{site}/{date}/{profile}" for profile in list_profiles]
 dxs = [dx] * len(profiles)
@@ -114,7 +113,7 @@ pad_id = word_to_index["[PAD]"]
 # Generation-time params (rock physics/gpdc), not part of checkpoint.py's
 # trimmed inference-only format -- read from the training data's own
 # params.json instead (produced by generation.py's save_dataset).
-with open(f"{paths.input}/training_data/{site}/params.json") as f:
+with (paths.input / "training_data" / site / "params.json").open() as f:
     data_params = json.load(f)
 
 # Under layers -- params.json still stores these in GPDC-format string form
@@ -177,18 +176,17 @@ if backend == "gpdc" and shutil.which("gpdc") is None:  # pyright: ignore[report
     sys.exit(1)
 
 
-for profile, dx in tqdm(zip(profiles, dxs, strict=True), total=len(profiles), desc="Profiles", colour="green"):
+for profile, _dx in tqdm(zip(profiles, dxs, strict=True), total=len(profiles), desc="Profiles", colour="green"):
     ### FIELD DISPERSION DATA FILES ---------------------------------------------------------------
     PROFILE_NAME = profile.split("/")[-1]
 
-    files = os.listdir(f"{paths.input}/real_data/{profile}/")
+    files: list[str] = [p.name for p in (paths.input / "real_data" / profile).iterdir()]
     files = sorted(files, key=lambda x: float(x.split("_")[0]))
 
     xmids = [float(x.split("_")[0]) for x in files]
     xmids = sorted(xmids)
 
-    if not os.path.exists(f"{paths.output}/{model_id}/{profile}/"):
-        os.makedirs(f"{paths.output}/{model_id}/{profile}/")
+    (paths.output / model_id / profile).mkdir(parents=True, exist_ok=True)
     ### -------------------------------------------------------------------------------------------
 
     ### INVERSION ---------------------------------------------------------------------------------
@@ -223,7 +221,6 @@ for profile, dx in tqdm(zip(profiles, dxs, strict=True), total=len(profiles), de
 
     for file in tqdm(files, total=len(files), leave=False, desc="Xmids"):
         computed = False
-        flag = False
         if dz != dz_origin:
             dz = dz_origin
             print(f"INFO : dz reset at {dz_origin}\n")
@@ -234,7 +231,9 @@ for profile, dx in tqdm(zip(profiles, dxs, strict=True), total=len(profiles), de
             fs_obs_raw, Vr_obs_raw = db[:, 0], db[:, 1]
 
             wl = len(Vr_obs_raw) / 4 + 1 if (len(Vr_obs_raw) / 4) % 2 == 0 else len(Vr_obs_raw) / 4
-            Vr_obs_raw = savgol_filter(Vr_obs_raw, window_length=wl, polyorder=2, mode="nearest")
+            Vr_obs_raw = np.asarray(
+                savgol_filter(Vr_obs_raw, window_length=wl, polyorder=2, mode="nearest"), dtype=np.float64
+            )
 
             axis_resamp = np.arange(min_freq, max_freq + 1, 1)
             fs_obs, Vr_obs = resamp(fs_obs_raw, Vr_obs_raw, axis_resamp=axis_resamp, type="frequency")
@@ -307,6 +306,9 @@ for profile, dx in tqdm(zip(profiles, dxs, strict=True), total=len(profiles), de
                 result = compute_seismic_forward(rock_physics, under_layers=under_layers, dispersion=dispersion)
                 if not result.dispersion_data:
                     raise RuntimeError("no dispersion mode resolved at this dz")
+                # n_modes carries over into the *next* iteration's DispersionConfig
+                # (can be lower than what was requested if the frequency range is too small).
+                dispersion_data, n_modes = result.dispersion_data, result.n_modes
             except RuntimeError as e:
                 print(f"\nERROR during dispersion computation: {e}")
                 print("Used parameters:")
@@ -320,17 +322,10 @@ for profile, dx in tqdm(zip(profiles, dxs, strict=True), total=len(profiles), de
                 print(f"INFO : dz reduced at {dz}\n")
                 if dz > 0.001:
                     continue
-                else:
-                    dispersion_data = disp_db[-1]
-                    rms = rms_x[-1]
-                    flag = True
+                dispersion_data = disp_db[-1]
+                rms = rms_x[-1]
 
             computed = True
-
-            if not flag:
-                dispersion_data, n_modes = result.dispersion_data, result.n_modes
-                # Updates number of computed modes (can be lower than what was defined if frequency range too small)
-            flag = False
 
             rms = np.sqrt(np.mean((Vr_obs_comp - dispersion_data[0][:, 1]) ** 2))
             nrms = rms / (np.max(Vr_obs_comp) - np.min(Vr_obs_comp))
@@ -389,7 +384,7 @@ for profile, dx in tqdm(zip(profiles, dxs, strict=True), total=len(profiles), de
     N_zx = pd.DataFrame(N_zx).to_numpy().T
     if N_zx.shape[0] < 4:
         N_zx = np.pad(N_zx, ((0, 4 - N_zx.shape[0]), (0, 0)), "constant", constant_values=np.nan)
-    WT_x = pd.array(WT_x).reshape(len(WT_x))
+    WT_x = np.array(WT_x)
 
     h_zx = pd.DataFrame(h_zx).to_numpy().T
     Sw_zx = pd.DataFrame(Sw_zx).to_numpy().T
@@ -423,7 +418,7 @@ for profile, dx in tqdm(zip(profiles, dxs, strict=True), total=len(profiles), de
     np.savetxt(f"{paths.output}/{model_id}/{profile}/z_zx.txt", z_zx, fmt="%.2f")
 
     # max_depth
-    with open(f"{paths.output}/{model_id}/{profile}/max_z.txt", "w") as f:
+    with (paths.output / model_id / profile / "max_z.txt").open("w") as f:
         f.write(f"{-data_params['max_depth']}")
 
     # xs
@@ -498,7 +493,7 @@ for profile, dx in tqdm(zip(profiles, dxs, strict=True), total=len(profiles), de
     ### -------------------------------------------------------------------------------------------
 
     ### RMS ---------------------------------------------------------------------------------------
-    with open(f"{paths.output}/{model_id}/{profile}/DCs-rms.txt", "w") as f:
+    with (paths.output / model_id / profile / "DCs-rms.txt").open("w") as f:
         f.write(f"Model ID: {model_id}\n\n")
         f.write(f"Profile: {profile}\n\n")
         f.write("Average root mean square error on the dispersion curves\n\n")
