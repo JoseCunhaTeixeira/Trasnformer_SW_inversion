@@ -14,7 +14,7 @@ import numpy as np
 from numpy.typing import NDArray
 from tqdm import tqdm
 
-from silex.checkpoint import CheckpointParams
+from silex.checkpoint import VocabData
 from silex.data import Dataset
 from silex.decoding import decode
 
@@ -36,22 +36,24 @@ class EvaluationResult:
     """Per-sample accuracy, same order as the evaluated dataset."""
 
 
-def evaluate(model: keras.Model, params: CheckpointParams, test_data: Dataset) -> EvaluationResult:
-    vocab_size = len(params.index_to_word)
-    vocab = [params.index_to_word[i] for i in range(vocab_size)]
+def evaluate(
+    model: keras.Model, output_seq_length: int, vocab_data: VocabData, test_data: Dataset
+) -> EvaluationResult:
+    vocab_size = len(vocab_data.index_to_word)
+    vocab = [vocab_data.index_to_word[i] for i in range(vocab_size)]
     confusion_matrix = np.zeros((vocab_size, vocab_size), dtype=np.int64)
     accuracies = np.zeros(test_data.x.shape[0])
 
-    start_id = params.word_to_index["[START]"]
-    end_id = params.word_to_index["[END]"]
-    pad_id = params.word_to_index["[PAD]"]
+    start_id = vocab_data.word_to_index["[START]"]
+    end_id = vocab_data.word_to_index["[END]"]
+    pad_id = vocab_data.word_to_index["[PAD]"]
 
     for i in tqdm(range(test_data.x.shape[0]), desc="Evaluating"):
         x = test_data.x[i : i + 1]
         target = test_data.y[i, 1:-1]  # drop the leading [START] and trailing [PAD]
 
         decoded = decode(
-            model, x, params.forbidden_tokens, start_id, end_id, pad_id, params.output_seq_length
+            model, x, vocab_data.forbidden_tokens, start_id, end_id, pad_id, output_seq_length
         )
         # decode() stops as soon as it emits [END]; pad back out to target's
         # fixed length so every position is compared, matching the original

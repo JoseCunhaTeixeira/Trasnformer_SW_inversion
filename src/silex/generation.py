@@ -38,7 +38,7 @@ import json
 import logging
 import random
 import shutil
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Literal
 
@@ -398,5 +398,11 @@ def save_dataset(samples: list[GeneratedSample], config: GenerationConfig, out_d
         "N_under_layers": config.under_layers.count("\n"),
         "dz": config.dz,
         "top_surface_level": config.dz,
+        # The raw GenerationConfig this dataset was generated from, in full --
+        # the fields above are a hand-picked, differently-named subset kept for
+        # backward compatibility with data.py/vocab.py's existing readers; this
+        # is the authoritative copy for anything else (e.g. a training script
+        # forwarding it into checkpoint.CheckpointParams.generation_config).
+        "generation_config": asdict(config),
     }
     (out_dir / "params.json").write_text(json.dumps(params, indent=2))

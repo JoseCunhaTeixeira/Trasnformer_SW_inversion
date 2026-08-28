@@ -32,14 +32,14 @@ def run() -> None:
     paths = Paths.from_env()
     data_dir = paths.input / "training_data" / site
 
-    model, params = load_checkpoint(paths.models / source_checkpoint)
+    model, params, vocab = load_checkpoint(paths.models / source_checkpoint)
     logger.info("Loaded checkpoint %s", source_checkpoint)
 
     max_n_layers = json.loads((data_dir / "params.json").read_text())["max_N_layers"]
 
     dataset = load_dataset(
         data_dir,
-        params.word_to_index,
+        vocab.word_to_index,
         max_n_layers,
         params.min_freq,
         params.max_freq,
@@ -61,7 +61,7 @@ def run() -> None:
     result = train(model, train_data, val_data=None, epochs=epochs, batch_size=batch_size)
 
     out_dir = paths.models / target_checkpoint
-    save_checkpoint(model, params, out_dir)
+    save_checkpoint(model, params, vocab, out_dir)
     plot_history(result).savefig(out_dir / "training_history.png", bbox_inches="tight")
     logger.info("Saved retrained checkpoint to %s", out_dir)
 

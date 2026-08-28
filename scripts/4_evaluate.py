@@ -27,14 +27,14 @@ def run() -> None:
     paths = Paths.from_env()
     data_dir = paths.input / "training_data" / site
 
-    model, params = load_checkpoint(paths.models / checkpoint_name)
+    model, params, vocab = load_checkpoint(paths.models / checkpoint_name)
     logger.info("Loaded checkpoint %s", checkpoint_name)
 
     max_n_layers = json.loads((data_dir / "params.json").read_text())["max_N_layers"]
 
     dataset = load_dataset(
         data_dir,
-        params.word_to_index,
+        vocab.word_to_index,
         max_n_layers,
         params.min_freq,
         params.max_freq,
@@ -49,7 +49,7 @@ def run() -> None:
     )
     logger.info("Evaluating on %d test samples", test_data.x.shape[0])
 
-    result = evaluate(model, params, test_data)
+    result = evaluate(model, params.output_seq_length, vocab, test_data)
 
     logger.info(
         "Accuracy=%.4f Precision=%.4f Recall=%.4f F1=%.4f",
@@ -83,11 +83,11 @@ def run() -> None:
     ax.set_ylim(0, 1)
     fig.savefig(out_dir / "accuracies.png", bbox_inches="tight")
 
-    vocab = list(params.word_to_index.keys())
+    vocab_words = list(vocab.word_to_index.keys())
     fig, ax = plt.subplots(dpi=200, figsize=(12, 10))
     im = ax.imshow(np.log1p(result.confusion_matrix), cmap="Reds")
-    ax.set_xticks(range(len(vocab)), vocab, rotation=90, fontsize=6)
-    ax.set_yticks(range(len(vocab)), vocab, fontsize=6)
+    ax.set_xticks(range(len(vocab_words)), vocab_words, rotation=90, fontsize=6)
+    ax.set_yticks(range(len(vocab_words)), vocab_words, fontsize=6)
     ax.set_xlabel("Decoded")
     ax.set_ylabel("Target")
     fig.colorbar(im, ax=ax, label="log1p(count)")

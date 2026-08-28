@@ -8,9 +8,10 @@ Run from the repo root: python scripts/2_train.py
 import json
 import logging
 
-from silex.checkpoint import CheckpointParams, save_checkpoint
+from silex.checkpoint import CheckpointParams, VocabData, save_checkpoint
 from silex.config import Paths
 from silex.data import Dataset, load_dataset
+from silex.generation import GenerationConfig, RockPhysicsConstants
 from silex.model import ModelConfig, build_model
 from silex.training import plot_history, train
 from silex.vocab import VocabParams, build_forbidden_tokens, build_index, build_vocab
@@ -81,6 +82,16 @@ def run() -> None:
 
     result = train(model, train_data, val_data, epochs=epochs, batch_size=batch_size)
 
+    # data_params["generation_config"] is the raw GenerationConfig the training
+    # data was generated from (see generation.py's save_dataset); reconstruct it
+    # rather than re-deriving generation-time fields (under_layers, dz, ...) by
+    # hand here, so the checkpoint records what was actually used, not a guess.
+    raw_generation_config = dict(data_params["generation_config"])
+    generation_config = GenerationConfig(
+        **{k: v for k, v in raw_generation_config.items() if k != "rock_physics"},
+        rock_physics=RockPhysicsConstants(**raw_generation_config["rock_physics"]),
+    )
+
     checkpoint_params = CheckpointParams(
         min_freq=min_freq,
         max_freq=max_freq,
@@ -89,12 +100,15 @@ def run() -> None:
         min_vel=dataset.min_vel,
         max_vel=dataset.max_vel,
         output_seq_length=output_seq_length,
+        generation_config=generation_config,
+    )
+    vocab_data = VocabData(
         word_to_index=word_to_index,
         index_to_word=index_to_word,
         forbidden_tokens=forbidden_tokens,
     )
     out_dir = paths.models / checkpoint_name
-    save_checkpoint(model, checkpoint_params, out_dir)
+    save_checkpoint(model, checkpoint_params, vocab_data, out_dir)
     plot_history(result).savefig(out_dir / "training_history.png", bbox_inches="tight")
     logger.info("Saved checkpoint to %s", out_dir)
 
