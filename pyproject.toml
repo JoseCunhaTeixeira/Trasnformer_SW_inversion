@@ -21,7 +21,7 @@ dependencies = [
 # Only generation.py (synthetic training-data generation) and the
 # Grand_Est QC script need Santiludo's rock-physics forward model --
 # training/retraining/evaluation/inference don't.
-generation = ["santiludo"]
+santiludo = ["santiludo"]
 
 # Only experiments/grand_est/plot_paper_figures.py's 3D cubes/slices (pyvista)
 # and its scientific colormap (cmcrameri) need these -- not part of base
