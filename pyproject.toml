@@ -24,19 +24,14 @@ dependencies = [
 # a compiled Cython/C++ extension: building it needs a C++ toolchain (on
 # Windows, MSVC via Visual Studio Build Tools) that not every machine
 # running the rest of this package has installed.
-generation = [
-    "santiludo @ git+https://github.com/JoseCunhaTeixeira/santiludo.git",
-]
+generation = ["santiludo"]
 
 # Only experiments/grand_est/plot_paper_figures.py's 3D cubes/slices (pyvista)
 # and its scientific colormap (cmcrameri) need these -- not part of base
 # dependencies since nothing else in the repo uses them. Neither was
 # actually installable before this was added (a pre-existing gap, not a
 # regression: the original script had the same unmet imports).
-paper_figures = [
-    "pyvista",
-    "cmcrameri",
-]
+paper_figures = ["pyvista", "cmcrameri"]
 
 [build-system]
 requires = ["setuptools>=61"]
