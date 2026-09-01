@@ -69,14 +69,14 @@ on already-generated data.
 Two optional extras cover the rest:
 
 ```bash
-uv sync --extra generation      # synthetic training-data generation
+uv sync --extra santiludo      # synthetic training-data santiludo
 uv sync --extra paper_figures   # experiments/grand_est/plot_paper_figures.py
 ```
 
-`generation` pulls in [santiludo](https://github.com/JoseCunhaTeixeira/santiludo), a
+`santiludo` pulls in [santiludo](https://github.com/JoseCunhaTeixeira/santiludo), a
 compiled Cython/C++ rock-physics package. Building it needs a C++ toolchain -- on
 Windows specifically, MSVC via Visual Studio Build Tools' "Desktop development with
-C++" workload; without it `uv sync --extra generation` fails with "Unable to find a
+C++" workload; without it `uv sync --extra santiludo` fails with "Unable to find a
 compatible Visual Studio installation." Dispersion-curve computation defaults to
 santiludo's `disba` backend (pure Python, installed automatically as one of
 santiludo's own dependencies -- no extra setup). The `gpdc` CLI binary from
