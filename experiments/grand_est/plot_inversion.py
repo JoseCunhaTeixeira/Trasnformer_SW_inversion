@@ -165,11 +165,19 @@ for PROFILE in tqdm(profiles, total=len(profiles)):
     ax.minorticks_on()
     fig.savefig(f"{paths.output}/{model_id}/{PROFILE}/soil_zx.png", bbox_inches="tight")
 
-    soil_int_zx = np.where(np.isnan(soil_int_zx), 0, soil_int_zx)
+    # Cells with no decoded soil at this depth/xmid (profile shorter than
+    # max_z) -- captured *before* zero-filling for the mode filter, since
+    # the filter can vote a real value in from same-row neighbors (e.g. a
+    # short log flanked by two longer ones sharing a soil type), which
+    # would make a later `== 0` check miss that the cell was never real
+    # data. Re-masked back to NaN after smoothing so missing depth stays
+    # missing (NaN) rather than getting filled in from neighbors.
+    soil_missing = np.isnan(soil_int_zx)
+    soil_int_zx = np.where(soil_missing, 0, soil_int_zx)
     smoothed_soil_int_zx = generic_filter(soil_int_zx, mode_filter_count, size=(1, 3))
     smoothed_soil_int_zx = generic_filter(smoothed_soil_int_zx, mode_filter_count, size=(1, 3))
-    soil_int_zx = np.where(soil_int_zx == 0, np.nan, soil_int_zx)
-    smoothed_soil_int_zx = np.where(smoothed_soil_int_zx == 0, np.nan, smoothed_soil_int_zx)
+    soil_int_zx = np.where(soil_missing, np.nan, soil_int_zx)
+    smoothed_soil_int_zx = np.where(soil_missing, np.nan, smoothed_soil_int_zx)
 
     fig, ax = plt.subplots(figsize=(19 * CM, 2.5 * CM), dpi=300)
     im = ax.pcolormesh(xs, zs_soil, smoothed_soil_int_zx, cmap=cmap, vmin=1, vmax=len(int_to_soil) - 1, alpha=0.5)
@@ -224,11 +232,13 @@ for PROFILE in tqdm(profiles, total=len(profiles)):
     ax.minorticks_on()
     fig.savefig(f"{paths.output}/{model_id}/{PROFILE}/N_zx.png", bbox_inches="tight")
 
-    N_int_zx = np.where(np.isnan(N_int_zx), 0, N_int_zx)
+    # Same missing-depth handling as the soil section above.
+    N_missing = np.isnan(N_int_zx)
+    N_int_zx = np.where(N_missing, 0, N_int_zx)
     smoothed_N_int_zx = generic_filter(N_int_zx, mode_filter_count, size=(1, 3))
     smoothed_N_int_zx = generic_filter(smoothed_N_int_zx, mode_filter_count, size=(1, 3))
-    N_int_zx = np.where(N_int_zx == 0, np.nan, N_int_zx)
-    smoothed_N_int_zx = np.where(smoothed_N_int_zx == 0, np.nan, smoothed_N_int_zx)
+    N_int_zx = np.where(N_missing, np.nan, N_int_zx)
+    smoothed_N_int_zx = np.where(N_missing, np.nan, smoothed_N_int_zx)
 
     fig, ax = plt.subplots(figsize=figsize, dpi=300)
     im = ax.pcolormesh(xs, zs_soil, smoothed_N_int_zx, cmap=cmap, vmin=min(Ns), vmax=max(Ns))
